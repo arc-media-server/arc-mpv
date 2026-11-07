@@ -1,0 +1,62 @@
+# Arc: copies the Apple binaries this commit's Package.swift downloads (edde746/mpv-build's own and
+# the mpvkit/*-build ones) into a release of this fork, checked against Package.swift's SwiftPM
+# checksums, and writes a Package.swift pointing at that release onto the `arc-binaries` branch.
+# Arc's Apple TV app then pins that branch's commit, so it builds whatever happens upstream.
+# Nothing is compiled: it only downloads, checks and uploads.
+name: Arc mirror (Apple binaries)
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to create (e.g. arc-6dbda06)
+        required: true
+permissions:
+  contents: write
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and check
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, re, urllib.request
+          tag = os.environ["TAG"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          s = open("Package.swift").read()
+          pairs = re.findall(r'url: "(https://[^"]+)",\s*checksum: "([0-9a-f]{64})"', s)
+          assert pairs, "no binary targets found"
+          os.makedirs("mirror", exist_ok=True)
+          for url, checksum in pairs:
+              name = url.rsplit("/", 1)[1]
+              path = os.path.join("mirror", name)
+              urllib.request.urlretrieve(url, path)
+              got = hashlib.sha256(open(path, "rb").read()).hexdigest()
+              assert got == checksum, f"{name}: checksum {got} != {checksum}"
+              s = s.replace(url, f"https://github.com/{repo}/releases/download/{tag}/{name}")
+              print(f"ok {name}")
+          open("Package.arc.swift", "w").write(s)
+          print(f"{len(pairs)} files checked")
+          PY
+        env:
+          TAG: ${{ inputs.tag }}
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$TAG" mirror/* --target "$GITHUB_SHA" --title "$TAG (Arc's mirror)" \
+            --notes "Apple XCFrameworks used by Arc, copied from edde746/mpv-build and mpvkit/*-build at $GITHUB_SHA and checked against Package.swift's checksums. Source: this repository at that commit."
+      - name: Point Package.swift at the mirror (branch arc-binaries)
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B arc-binaries
+          mv Package.arc.swift Package.swift
+          git add Package.swift
+          git commit -qm "Package.swift: binaries from this fork's $TAG release"
+          git push -f origin arc-binaries
+          echo "Pin Arc to: $(git rev-parse HEAD)"
