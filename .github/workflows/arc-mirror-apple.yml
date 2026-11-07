@@ -1,6 +1,6 @@
 # Arc: copies the Apple binaries this commit's Package.swift downloads (edde746/mpv-build's own and
 # the mpvkit/*-build ones) into a release of this fork, checked against Package.swift's SwiftPM
-# checksums, and writes a Package.swift pointing at that release onto the `arc-binaries` branch.
+# checksums, and writes a Package.swift pointing at that release onto the branch `arc-binaries/<tag>`.
 # Arc's Apple TV app then pins that branch's commit, so it builds whatever happens upstream.
 # Nothing is compiled: it only downloads, checks and uploads.
 name: Arc mirror (Apple binaries)
@@ -48,15 +48,15 @@ jobs:
         run: |
           gh release create "$TAG" mirror/* --target "$GITHUB_SHA" --title "$TAG (Arc's mirror)" \
             --notes "Apple XCFrameworks used by Arc, copied from edde746/mpv-build and mpvkit/*-build at $GITHUB_SHA and checked against Package.swift's checksums. Source: this repository at that commit."
-      - name: Point Package.swift at the mirror (branch arc-binaries)
+      - name: Point Package.swift at the mirror (branch arc-binaries/<tag>)
         env:
           TAG: ${{ inputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B arc-binaries
+          git checkout -b "arc-binaries/$TAG"
           mv Package.arc.swift Package.swift
           git add Package.swift
           git commit -qm "Package.swift: binaries from this fork's $TAG release"
-          git push -f origin arc-binaries
+          git push origin "arc-binaries/$TAG"
           echo "Pin Arc to: $(git rev-parse HEAD)"
